@@ -82,7 +82,9 @@ class VOCSemanticDataset(Dataset):
         self.xml_dir = self.root_dir + 'Annotations/'
         self.mask_dir = self.root_dir + 'SegmentationClass/'
 
-        self.image_id_list = [image_id.strip() for image_id in open('./data/%s.txt' % domain).readlines()]
+        split_path = os.path.join(self.root_dir, "ImageSets", "Segmentation", f"{domain}.txt")
+        self.image_id_list = [x.strip() for x in open(split_path)]
+
         self.transform = transform
         self.with_id = with_id
         self.with_mask = with_mask
@@ -147,3 +149,65 @@ class TorchVOCSegmentation(VOCSegmentation):
 
         target = np.array(target)
         return img, target
+
+class CubiCasaSegmentation(VOCSemanticDataset):
+    def __init__(self, root_dir, domain, transform, with_id=False, with_mask=False, target_transform=None):
+        super(CubiCasaSegmentation, self).__init__(
+            root_dir=root_dir,
+            domain=domain,
+            transform=transform,
+            with_id=with_id,
+            with_mask=with_mask
+        )
+
+        self.root_dir = root_dir
+        self.transform = transform
+
+        self.image_dir = os.path.join(self.root_dir, 'JPEGImages/') 
+        self.mask_dir = os.path.join(self.root_dir, 'SegmentationClass/')
+
+        self.class_names =  ["background", "rooms", "walls", "doors", "windows"]
+        
+        splits_dir = os.path.join(self.root_dir, 'ImageSets/Segmentation')
+        split_f = os.path.join(splits_dir, domain.rstrip('\n') + '.txt')
+
+        if not os.path.exists(split_f):
+            raise ValueError(
+                'Wrong domain entered! Please use domain="train" '
+                'or domain="trainval" or domain="val"')
+        
+        self.image_id_list = [image_id.strip() for image_id in open(split_f).readlines()]
+    
+
+    def get_image(self, image_id):
+        image = Image.open(os.path.join(self.image_dir, image_id + '.jpg')).convert('RGB')
+        if self.transform is not None:
+            image = self.transform(image)
+        return image
+
+    def get_mask(self, image_id):
+        mask_path = self.mask_dir + image_id + '.png'
+        if os.path.isfile(mask_path):
+            mask = Image.open(mask_path)
+            mask = self.transform(mask)
+        else:
+            mask = None
+        return mask
+
+    def __getitem__(self, index):
+        image_id = self.image_id_list[index]
+
+        image = self.get_image(image_id)
+        mask  = self.get_mask(image_id)
+        mask = np.array(mask)
+
+        # data_list = [self.get_image(image_id)]
+
+        # if self.with_id:
+        #     data_list.append(image_id)
+
+        # if self.with_mask:
+        #     data_list.append(self.get_mask(image_id))
+
+        return image, mask
+        

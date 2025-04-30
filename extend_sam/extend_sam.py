@@ -2,7 +2,7 @@
 import torch
 import torch.nn as nn
 from .segment_anything_ori import sam_model_registry
-from .image_encoder_adapter import BaseImgEncodeAdapter
+from .image_encoder_adapter import BaseImgEncodeAdapter, LoRAImageEncoderAdapter
 from .mask_decoder_adapter import BaseMaskDecoderAdapter, SemMaskDecoderAdapter
 from .prompt_encoder_adapter import BasePromptEncodeAdapter
 
@@ -14,7 +14,7 @@ class BaseExtendSam(nn.Module):
         assert model_type in ['default', 'vit_b', 'vit_l', 'vit_h'], print(
             "Wrong model_type, SAM only can be built as vit_b, vot_l, vit_h and default ")
         self.ori_sam = sam_model_registry[model_type](ckpt_path)
-        self.img_adapter = BaseImgEncodeAdapter(self.ori_sam, fix=fix_img_en)
+        self.img_adapter = LoRAImageEncoderAdapter(self.ori_sam, fix=True)
         self.prompt_adapter = BasePromptEncodeAdapter(self.ori_sam, fix=fix_prompt_en)
         self.mask_adapter = BaseMaskDecoderAdapter(self.ori_sam, fix=fix_mask_de)
 

@@ -1,11 +1,12 @@
 from .detection import BaseDetectionDataset
 from .instance_seg import BaseInstanceDataset
-from .semantic_seg import BaseSemanticDataset, VOCSemanticDataset, TorchVOCSegmentation
+from .semantic_seg import BaseSemanticDataset, VOCSemanticDataset, TorchVOCSegmentation, CubiCasaSegmentation
 from .transforms import get_transforms
 from torchvision.datasets import VOCSegmentation
 
 segment_datasets = {'base_ins': BaseInstanceDataset, 'base_sem': BaseSemanticDataset,
-                    'voc_sem': VOCSemanticDataset, 'torch_voc_sem': TorchVOCSegmentation}
+                    'voc_sem': VOCSemanticDataset, 'torch_voc_sem': TorchVOCSegmentation,
+                    'cubicasa_sem_seg': CubiCasaSegmentation}
 det_dataset = {'base_det': BaseDetectionDataset, }
 
 
@@ -23,6 +24,7 @@ def get_dataset(cfg):
     if name in det_dataset:
         return det_dataset[name](**cfg.params, transform=transform)
     target_transform = get_transforms(cfg.target_transforms)
+    print(cfg.params)
     return segment_datasets[name](**cfg.params, transform=transform, target_transform=target_transform)
 
 
