@@ -6,6 +6,7 @@ import cv2
 import torch.nn.functional as F
 import os
 import torch.nn as nn
+from torch.cuda.amp import autocast, GradScaler
 
 
 class BaseRunner():
@@ -35,6 +36,7 @@ class SemRunner(BaseRunner):
     def __init__(self, model, optimizer, losses, train_loader, val_loader, scheduler):
         super().__init__(model, optimizer, losses, train_loader, val_loader, scheduler)
         self.exist_status = ['train', 'eval', 'test']
+        self.scaler = GradScaler()  # Initialize gradient scaler for mixed precision
 
     def train(self, cfg):
         # initial identify
@@ -54,15 +56,22 @@ class SemRunner(BaseRunner):
         for iteration in range(cfg.max_iter):
             images, labels = train_iterator.get()
             images, labels = images.cuda(), labels.cuda().long()
-            masks_pred, iou_pred = self.model(images)
-            masks_pred = F.interpolate(masks_pred, self.original_size, mode="bilinear", align_corners=False)
+            
+            # Use autocast for mixed precision training
+            with autocast():
+                masks_pred, iou_pred = self.model(images)
+                masks_pred = F.interpolate(masks_pred, self.original_size, mode="bilinear", align_corners=False)
 
-            total_loss = torch.zeros(1).cuda()
-            loss_dict = {}
-            self._compute_loss(total_loss, loss_dict, masks_pred, labels, cfg)
+                total_loss = torch.zeros(1).cuda()
+                loss_dict = {}
+                self._compute_loss(total_loss, loss_dict, masks_pred, labels, cfg)
+
+            # Gradient scaling for mixed precision
             self.optimizer.zero_grad()
-            total_loss.backward()
-            self.optimizer.step()
+            self.scaler.scale(total_loss).backward()
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
+            
             self.scheduler.step()
             loss_dict['total_loss'] = total_loss.item()
             train_meter.add(loss_dict)
@@ -99,7 +108,9 @@ class SemRunner(BaseRunner):
             for index, (images, labels) in enumerate(self.val_loader):
                 images = images.cuda()
                 labels = labels.cuda()
-                masks_pred, iou_pred = self.model(images)
+                # Use autocast for evaluation as well
+                with autocast():
+                    masks_pred, iou_pred = self.model(images)
                 predictions = torch.argmax(masks_pred, dim=1)
                 for batch_index in range(images.size()[0]):
                     pred_mask = get_numpy_from_tensor(predictions[batch_index])

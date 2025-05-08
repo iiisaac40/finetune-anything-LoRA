@@ -2,6 +2,7 @@ import torch.nn as nn
 from .segment_anything_ori.modeling.sam import Sam
 from peft import LoraConfig, get_peft_model, TaskType
 from .utils import fix_params
+from torch.cuda.amp import autocast, GradScaler
 
 
 class BaseImgEncodeAdapter(nn.Module):
