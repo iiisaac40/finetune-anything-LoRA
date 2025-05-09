@@ -26,6 +26,7 @@ class BaseMaskDecoderAdapter(MaskDecoder):
         super(BaseMaskDecoderAdapter, self).__init__(transformer_dim=ori_sam.mask_decoder.transformer_dim,
                                                      transformer=ori_sam.mask_decoder.transformer)
         self.sam_mask_decoder = ori_sam.mask_decoder
+        
         if fix:
             fix_params(self.sam_mask_decoder)  # move to runner to implement
 

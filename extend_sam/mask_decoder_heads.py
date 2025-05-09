@@ -159,6 +159,37 @@ class SemSegHead(nn.Module):
             transformer_dim, iou_head_hidden_dim, self.num_mask_tokens, iou_head_depth
         )
 
+        # Initialize weights
+        self._init_weights()
+
+    def _init_weights(self):
+        """Initialize the weights of all components using Xavier/Kaiming initialization"""
+        def _init_conv(m):
+            if isinstance(m, (nn.Conv2d, nn.ConvTranspose2d)):
+                # Kaiming initialization for conv/transposed conv layers
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+        
+        # Initialize upscaling layers
+        self.output_upscaling.apply(_init_conv)
+        
+        # Initialize hypernetworks MLPs with small weights
+        for mlp in self.output_hypernetworks_mlps:
+            for layer in mlp.layers:
+                if isinstance(layer, nn.Linear):
+                    # Use smaller weights for stability and better initial predictions
+                    nn.init.xavier_normal_(layer.weight, gain=0.1)
+                    if layer.bias is not None:
+                        nn.init.constant_(layer.bias, 0)
+        
+        # Initialize IoU prediction head
+        for layer in self.iou_prediction_head.layers:
+            if isinstance(layer, nn.Linear):
+                nn.init.xavier_normal_(layer.weight, gain=1.0)
+                if layer.bias is not None:
+                    nn.init.constant_(layer.bias, 0)
+
     def forward(
             self,
             src: torch.Tensor,

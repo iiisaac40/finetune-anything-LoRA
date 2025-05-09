@@ -32,31 +32,50 @@ train:
 
   # Losses
   losses:
-    ce:
-      weight: 0.5
-      params:  # ~ means None type, the initial params of loss could be identified here
-        ignore_index: 0
+    # ce:
+    #   weight: 0.5
+    #   params:  # ~ means None type, the initial params of loss could be identified here
+    #     ignore_index: 0
+    #   label_one_hot: False
+    combined:
+      weight: 1.0
       label_one_hot: False
+      params:
+        ignore_index: 0
+        alpha: 1.0  # weight for CE loss
+        beta: 0.5   # weight for Dice loss
+        gamma_focal: 0.25  # weight for Focal loss
 
   # Optimizer
   opt_params:
-    lr_default:  1e-3
-    wd_default: 1e-4
+    lr_default: 2e-5
+    wd_default: 1e-5
     momentum: 0.9
-    lr_list:  [ 1e-2, ]
-    group_keys: [ [ 'mask_adapter.decoder_head.output_hypernetworks_mlps', ], ]
-    wd_list:  [ 0.0, ]
-  opt_name: 'sgd' # 'sgd'
-  scheduler_name: 'cosine'
+    betas: [0.9, 0.999]  # Adam parameters
+    eps: 1e-8            # Adam parameters
+    lr_list: [1e-3]
+    group_keys: [['mask_adapter.decoder_head.output_hypernetworks_mlps']]
+    wd_list: [1e-3]
+  opt_name: 'adamw'
+
+
+  # scheduler_name: 'cosine'
+  scheduler_name: 'warmup_multi_step'
+  scheduler_params:
+    stepsize: [30000, 60000, 90000]  # Milestones for lr decay
+    gamma: 0.1                        # Decay factor
+    warmup_factor: 0.1              # Initial lr = base_lr * warmup_factor
+    warmup_steps: 1000      
 
   # Runner
   max_iter: 100000
   log_iter: 20
   eval_iter: 200
+  vis_iter: 50  # Add visualization interval
   runner_name: 'sem_runner'
   # Dataloader
   bs: 2 # 8
-  num_workers: 2
+  num_workers: 1
   drop_last: True
   # Logger
   use_tensorboard: True
@@ -82,7 +101,7 @@ val:
         params:
           size: [1024, 1024]
 
-  bs: 8
+  bs: 2
   num_workers: 2
   drop_last: True
 

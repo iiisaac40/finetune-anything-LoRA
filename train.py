@@ -37,9 +37,14 @@ if __name__ == '__main__':
     model = get_model(model_name=train_cfg.model.sam_name, **train_cfg.model.params)
     opt_params = get_opt_pamams(model, lr_list=train_cfg.opt_params.lr_list, group_keys=train_cfg.opt_params.group_keys,
                                 wd_list=train_cfg.opt_params.wd_list)
+    # print(f"opt_params: {opt_params}")
     optimizer = get_optimizer(opt_name=train_cfg.opt_name, params=opt_params, lr=train_cfg.opt_params.lr_default,
                               momentum=train_cfg.opt_params.momentum, weight_decay=train_cfg.opt_params.wd_default)
-    scheduler = get_scheduler(optimizer=optimizer, lr_scheduler=train_cfg.scheduler_name)
+    scheduler = get_scheduler(optimizer=optimizer, lr_scheduler=train_cfg.scheduler_name,
+                              stepsize=train_cfg.scheduler_params.stepsize,
+                              gamma=train_cfg.scheduler_params.gamma,
+                              warmup_factor=train_cfg.scheduler_params.warmup_factor,
+                              warmup_steps=train_cfg.scheduler_params.warmup_steps)
     runner = get_runner(train_cfg.runner_name)(model, optimizer, losses, train_loader, val_loader, scheduler)
     # train_step
     runner.train(train_cfg)

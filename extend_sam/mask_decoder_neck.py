@@ -46,7 +46,7 @@ class MaskDecoderNeck(nn.Module):
         self.num_multimask_outputs = num_multimask_outputs
 
         self.iou_token = nn.Embedding(1, transformer_dim)
-        self.num_mask_tokens = num_multimask_outputs + 1
+        self.num_mask_tokens = num_multimask_outputs + 1 # num_multimask_outputs + 1
         self.mask_tokens = nn.Embedding(self.num_mask_tokens, transformer_dim)
 
         self.output_upscaling = nn.Sequential(
@@ -56,6 +56,25 @@ class MaskDecoderNeck(nn.Module):
             nn.ConvTranspose2d(transformer_dim // 4, transformer_dim // 8, kernel_size=2, stride=2),
             activation(),
         )
+
+        # Initialize weights
+        self._init_weights()
+
+    def _init_weights(self):
+        """Initialize the weights of all components"""
+        def _init_conv(m):
+            if isinstance(m, (nn.Conv2d, nn.ConvTranspose2d)):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+        
+        # Initialize upscaling layers
+        self.output_upscaling.apply(_init_conv)
+        
+        # Initialize embedding layers with truncated normal distribution
+        std = 0.02  # Standard deviation for embeddings
+        nn.init.trunc_normal_(self.iou_token.weight, std=std, a=-2*std, b=2*std)
+        nn.init.trunc_normal_(self.mask_tokens.weight, std=std, a=-2*std, b=2*std)
 
     def forward(
             self,

@@ -16,12 +16,32 @@ AVAI_RUNNER = {'base_runner': BaseRunner, 'sem_runner': SemRunner}
 def get_model(model_name, **kwargs):
     if model_name not in AVAI_MODEL:
         print('not supported model name, please implement it first.')
+    print(f"kwargs: {kwargs}")
     return AVAI_MODEL[model_name](**kwargs).cuda()
 
 
 def get_optimizer(opt_name, **kwargs):
     if opt_name not in AVAI_OPT:
         print('not supported optimizer name, please implement it first.')
+    
+    # Filter parameters based on optimizer type
+    if opt_name == 'adam' or opt_name == 'adamw':
+        # Remove SGD-specific parameters
+        kwargs.pop('momentum', None)
+        # Ensure Adam-specific parameters are present
+        if 'betas' not in kwargs:
+            kwargs['betas'] = (0.9, 0.999)
+        if 'eps' not in kwargs:
+            kwargs['eps'] = 1e-8
+    elif opt_name == 'sgd':
+        # Remove Adam-specific parameters
+        kwargs.pop('betas', None)
+        kwargs.pop('eps', None)
+        # Ensure SGD-specific parameters are present
+        if 'momentum' not in kwargs:
+            kwargs['momentum'] = 0.9
+
+    print(f"kwargs: {kwargs.keys()}")
     return AVAI_OPT[opt_name](**{k: v for k, v in kwargs.items() if v is not None})
 
 
@@ -70,6 +90,7 @@ def get_scheduler(
             )
         )
 
+
     if lr_scheduler == "single_step":
         if isinstance(stepsize, list):
             stepsize = stepsize[-1]
@@ -96,6 +117,12 @@ def get_scheduler(
         )
 
     elif lr_scheduler == "warmup_multi_step":
+        # Convert OmegaConf ListConfig to list first
+        if hasattr(stepsize, '_is_list'):
+            stepsize = list(stepsize)
+        elif hasattr(stepsize, '__iter__'):  # Handle other iterable types
+            stepsize = list(stepsize)
+            
         if not isinstance(stepsize, list):
             raise TypeError(
                 "For warmup multi_step lr_scheduler, stepsize must "

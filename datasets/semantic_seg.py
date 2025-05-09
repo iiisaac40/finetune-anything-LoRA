@@ -3,6 +3,7 @@ from PIL import Image
 from torch.utils.data import Dataset
 from torchvision.datasets import VOCSegmentation, VisionDataset
 import numpy as np
+import torch
 
 
 class BaseSemanticDataset(VisionDataset):
@@ -167,6 +168,7 @@ class CubiCasaSegmentation(VOCSemanticDataset):
         self.mask_dir = os.path.join(self.root_dir, 'SegmentationClass/')
 
         self.class_names =  ["background", "rooms", "walls", "doors", "windows"]
+        # self.class_names =  ["background", "walls", "doors", "windows"]
         
         splits_dir = os.path.join(self.root_dir, 'ImageSets/Segmentation')
         split_f = os.path.join(splits_dir, domain.rstrip('\n') + '.txt')
@@ -189,7 +191,15 @@ class CubiCasaSegmentation(VOCSemanticDataset):
         mask_path = self.mask_dir + image_id + '.png'
         if os.path.isfile(mask_path):
             mask = Image.open(mask_path)
-            mask = self.transform(mask)
+            
+            resize = self.transform.transforms[0]  # Get the resize transform
+            mask = resize(mask)
+            mask_np = np.array(mask)
+            # Shift labels greater than 1 down by 1 to ignore label 1
+            mask_np[mask_np == 1] = 0
+            mask_np = mask_np.astype(np.float32)
+            mask = torch.from_numpy(mask_np).float()
+
         else:
             mask = None
         return mask
