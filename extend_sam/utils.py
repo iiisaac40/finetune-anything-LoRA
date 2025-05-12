@@ -100,11 +100,11 @@ class mIoUOnline:
     def __init__(self, class_names):
         self.class_names = ['background'] + class_names
         self.class_num = len(self.class_names)
-
         self.clear()
 
     def get_data(self, pred_mask, gt_mask):
-        obj_mask = gt_mask < 255
+        # Only consider non-background pixels
+        obj_mask = (gt_mask < 255) & (gt_mask > 0)  # Exclude background (0) and invalid (255)
         correct_mask = (pred_mask == gt_mask) * obj_mask
 
         P_list, T_list, TP_list = [], [], []
@@ -123,7 +123,8 @@ class mIoUOnline:
             self.TP[i] += TP_list[i]
 
     def add(self, pred_mask, gt_mask):
-        obj_mask = gt_mask < 255
+        # Only consider non-background pixels
+        obj_mask = (gt_mask < 255) & (gt_mask > 0)  # Exclude background (0) and invalid (255)
         correct_mask = (pred_mask == gt_mask) * obj_mask
 
         for i in range(self.class_num):
@@ -134,10 +135,10 @@ class mIoUOnline:
     def get(self, detail=False, clear=True):
         IoU_dic = {}
         IoU_list = []
-
         FP_list = []  # over activation
         FN_list = []  # under activation
 
+        # Calculate IoU for all classes but only include non-background in metrics
         for i in range(self.class_num):
             IoU = self.TP[i] / (self.T[i] + self.P[i] - self.TP[i] + 1e-10) * 100
             FP = (self.P[i] - self.TP[i]) / (self.T[i] + self.P[i] - self.TP[i] + 1e-10)
@@ -145,12 +146,15 @@ class mIoUOnline:
 
             IoU_dic[self.class_names[i]] = IoU
 
-            IoU_list.append(IoU)
-            FP_list.append(FP)
-            FN_list.append(FN)
+            # Only include non-background classes in the lists
+            if i > 0:  # Skip background class
+                IoU_list.append(IoU)
+                FP_list.append(FP)
+                FN_list.append(FN)
 
-        mIoU = np.mean(np.asarray(IoU_list))
-        mIoU_foreground = np.mean(np.asarray(IoU_list)[1:])
+        # Calculate metrics only on non-background classes
+        mIoU = np.mean(np.asarray(IoU_list))  # Already only includes non-background
+        mIoU_foreground = mIoU  # Same as mIoU since we're only considering foreground
 
         FP = np.mean(np.asarray(FP_list))
         FN = np.mean(np.asarray(FN_list))
@@ -232,3 +236,113 @@ def one_hot_embedding_3d(labels, class_num=21):
     one_hot_labels = labels.clone()
     one_hot_labels[one_hot_labels == 255] = 0 # 0 is background
     return F.one_hot(one_hot_labels, num_classes=class_num).permute(0, 3, 1, 2).contiguous().float()
+
+
+# Constants for visualization
+LABEL_COLORS = {
+    0: [0, 0, 0],        # Background - Black
+    1: [0, 255, 0],      # Room -> Green
+    2: [255, 0, 0],      # Wall -> Red
+    3: [0, 0, 255],      # Door -> Blue
+    4: [255, 255, 0],    # Window -> Yellow
+}
+
+LABEL_NAMES = {
+    0: 'Background',
+    1: 'Room',
+    2: 'Wall',
+    3: 'Door',
+    4: 'Window'
+}
+
+def apply_label_colors(pred_mask):
+    """
+    Converts a prediction mask to a colored mask based on predefined label colors.
+    
+    Args:
+        pred_mask (numpy.ndarray): The prediction mask array
+    
+    Returns:
+        numpy.ndarray: The colored mask
+    """
+    # Initialize a color image (3 channels: RGB)
+    colored_mask = np.zeros((pred_mask.shape[0], pred_mask.shape[1], 3), dtype=np.uint8)
+    
+    # Apply the colors based on the labels in the mask
+    for label, color in LABEL_COLORS.items():
+        if label == 1: continue  # Skip room label
+        colored_mask[pred_mask == label] = color
+    
+    return colored_mask
+
+def overlay_mask_on_image(image, pred_mask):
+    """
+    Overlays the colored mask onto the original image.
+    
+    Args:
+        image (numpy.ndarray): The original RGB image
+        pred_mask (numpy.ndarray): The prediction mask array
+    
+    Returns:
+        numpy.ndarray: The image with the overlayed mask
+    """
+    colored_mask = apply_label_colors(pred_mask)
+    
+    if image.shape[2] != 3:
+        raise ValueError("The input image must have 3 channels (RGB).")
+        
+    overlayed_image = image.copy()
+    
+    # Create mask for valid regions (excluding background and room)
+    mask_region = (pred_mask > 0) & (pred_mask < 5)
+    
+    # Apply mask overlay
+    overlayed_image[mask_region] = colored_mask[mask_region]
+    
+    return overlayed_image
+
+def create_visualization(image, pred_mask, output_path):
+    """
+    Creates and saves a side-by-side visualization of the original image and prediction.
+    
+    Args:
+        image (numpy.ndarray): The original RGB image
+        pred_mask (numpy.ndarray): The prediction mask array
+        output_path (str): Path to save the visualization
+    """
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Patch
+    
+    # Set pred_mask class 1 (room) to 0 (background)
+    pred_mask = pred_mask.copy()
+    pred_mask[pred_mask == 1] = 0
+    
+    # Generate overlay
+    overlay_pred = overlay_mask_on_image(image, pred_mask)
+    
+    # Create matplotlib figure
+    fig, axs = plt.subplots(1, 2, figsize=(12, 6))
+    
+    # Plot original image
+    axs[0].imshow(image)
+    axs[0].set_title("Input RGB")
+    
+    # Plot prediction overlay
+    axs[1].imshow(overlay_pred)
+    axs[1].set_title("Prediction")
+    
+    # Add legend
+    legend_handles = [
+        Patch(color=np.array(LABEL_COLORS[label])/255.0, label=LABEL_NAMES[label])
+        for label in LABEL_COLORS
+        if label != 1  # Skip room label
+    ]
+    fig.legend(handles=legend_handles, loc='lower center', ncol=4, fontsize='small')
+    
+    # Adjust layout
+    plt.tight_layout()
+    plt.subplots_adjust(bottom=0.2)
+    
+    # Save visualization
+    plt.savefig(output_path, dpi=500)
+    plt.close()

@@ -41,7 +41,7 @@ def get_optimizer(opt_name, **kwargs):
         if 'momentum' not in kwargs:
             kwargs['momentum'] = 0.9
 
-    print(f"kwargs: {kwargs.keys()}")
+    # print(f"kwargs: {kwargs.keys()}")
     return AVAI_OPT[opt_name](**{k: v for k, v in kwargs.items() if v is not None})
 
 

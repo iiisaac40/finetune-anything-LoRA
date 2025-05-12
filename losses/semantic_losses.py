@@ -163,8 +163,14 @@ class CombinedLoss(nn.Module):
         self.alpha = alpha
         self.beta = beta
         self.gamma_focal = gamma_focal
-        # Initialize alpha for focal loss with small non-zero weights for stability
-        focal_alpha = [0.01, 0.01, 0.32, 0.32, 0.34]  # Small non-zero weights for stability
+        # Initialize alpha for focal loss with higher weights for difficult classes
+        # Class order: [background, walls, doors, windows]
+        # Give higher weights to doors and windows since they are harder to detect
+        focal_alpha = [0.1,  # background 
+                       0.1,  # rooms
+                       0.35,    # walls
+                       0.5,    # doors - higher weight
+                       0.5]    # windows - highest weight since hardest to detect
         
         self.hard_mining_loss = DeepLabCE(ignore_label=ignore_index, top_k_percent_pixels=0.2)
         self.dice_loss = DiceLoss(ignore_index=ignore_index)

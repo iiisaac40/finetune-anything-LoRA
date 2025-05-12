@@ -1,6 +1,6 @@
 from datasets import Iterator
 from .utils import Average_Meter, Timer, print_and_save_log, mIoUOnline, get_numpy_from_tensor, save_model, write_log, \
-    check_folder, one_hot_embedding_3d
+    check_folder, one_hot_embedding_3d, apply_label_colors, overlay_mask_on_image, create_visualization
 import torch
 import cv2
 import torch.nn.functional as F
@@ -8,6 +8,11 @@ import os
 import torch.nn as nn
 from torch.amp import autocast, GradScaler
 import wandb
+import numpy as np
+from tqdm import tqdm
+import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
+from PIL import Image
 
 
 class BaseRunner():
@@ -38,6 +43,7 @@ class SemRunner(BaseRunner):
         super().__init__(model, optimizer, losses, train_loader, val_loader, scheduler)
         self.exist_status = ['train', 'eval', 'test']
         self.scaler = GradScaler("cuda")  # Initialize with device type
+        self.class_num = None
 
     def init_wandb(self, cfg):
         """Initialize wandb with project configuration"""
@@ -85,37 +91,53 @@ class SemRunner(BaseRunner):
         if images.shape[0] == 0:
             return
         
-        # Take only the first few images
         n_images = min(images.shape[0], max_images)
         images = images[:n_images]
         masks_pred = masks_pred[:n_images]
         labels = labels[:n_images]
-
-        # Convert predictions to class indices
         pred_labels = torch.argmax(masks_pred, dim=1)
 
-        # Create visualization
         for idx in range(n_images):
-            # Convert tensors to numpy arrays
             image = get_numpy_from_tensor(images[idx])
             pred = get_numpy_from_tensor(pred_labels[idx])
             true_mask = get_numpy_from_tensor(labels[idx])
 
+            # Convert image from [C, H, W] to [H, W, C]
+            if image.ndim == 3 and image.shape[0] in [1, 3]:
+                image = image.transpose(1, 2, 0)
+            image = (image * 255).astype(np.uint8)
+
+            # Resize all to match image size
+            h, w = image.shape[:2]
+            pred = cv2.resize(pred, (w, h), interpolation=cv2.INTER_NEAREST)
+            true_mask = cv2.resize(true_mask, (w, h), interpolation=cv2.INTER_NEAREST)
+
+            # Color scheme (same as test)
+            colors = {
+                0: [0, 0, 0],        # Background - Black
+                1: [0, 255, 0],      # Room -> Green
+                2: [255, 0, 0],      # Wall -> Red
+                3: [0, 0, 255],      # Door -> Blue
+                4: [255, 255, 0],    # Window -> Yellow
+            }
+            pred_colored = np.zeros((h, w, 3), dtype=np.uint8)
+            gt_colored = np.zeros((h, w, 3), dtype=np.uint8)
+            for class_idx, color in colors.items():
+                pred_colored[pred == class_idx] = color
+                gt_colored[true_mask == class_idx] = color
+
+            # Side-by-side visualization
+            vis_image = np.concatenate([image, pred_colored, gt_colored], axis=1)
+
             # Log to wandb
             wandb.log({
-                f"predictions/{idx}": wandb.Image(
-                    image,
-                    masks={
-                        "predictions": {"mask_data": pred, "class_labels": {i: str(i) for i in range(self.class_num)}},
-                        "ground_truth": {"mask_data": true_mask, "class_labels": {i: str(i) for i in range(self.class_num)}}
-                    }
-                )
+                f"visualization/{idx}": wandb.Image(vis_image, caption="[Input | Prediction | Ground Truth]")
             }, step=step)
 
     def train(self, cfg):
         # Initialize wandb
         self.init_wandb(cfg)
-        
+        self.class_num = cfg.model.params.class_num
         # initial identify
         train_meter = Average_Meter(list(self.losses.keys()) + ['total_loss'])
         train_iterator = Iterator(self.train_loader)
@@ -133,7 +155,7 @@ class SemRunner(BaseRunner):
             with autocast(device_type='cuda'):
                 masks_pred, iou_pred = self.model(images)
                 masks_pred = F.interpolate(masks_pred, self.original_size, mode="bilinear", align_corners=False)
-                print(f"masks_pred.shape: {masks_pred.shape}  and  iou_pred.shape: {iou_pred.shape}")
+                print(f"masks_pred.shape: {masks_pred.shape}  and  labels.shape: {labels.shape}")
                 total_loss = torch.zeros(1).cuda()
                 loss_dict = {}
                 self._compute_loss(total_loss, loss_dict, masks_pred, labels, cfg)
@@ -153,7 +175,7 @@ class SemRunner(BaseRunner):
                 metrics = train_meter.get(clear=True)
                 self.log_metrics(metrics, iteration, "train")
                 # Log sample predictions
-                # self.log_images(images, masks_pred, labels, iteration)
+                self.log_images(images, masks_pred, labels, iteration)
                 
                 write_log(iteration=iteration, log_path=log_path, log_data=metrics,
                          status=self.exist_status[0],
@@ -183,8 +205,81 @@ class SemRunner(BaseRunner):
         save_model(self.model, model_path, is_final=True, parallel=self.the_number_of_gpu > 1)
         wandb.finish()  # Close wandb run
 
-    def test(self):
-        pass
+    def test(self, cfg):
+        """Test function that performs evaluation and visualization"""
+        self.model.eval()
+        self.eval_timer.start()
+        class_names = self.val_loader.dataset.class_names
+        eval_metric = mIoUOnline(class_names=class_names)
+        
+        # Create output directory for visualizations if it doesn't exist
+        vis_dir = os.path.join(cfg.model_folder, cfg.experiment_name, 'test_visualizations')
+        os.makedirs(vis_dir, exist_ok=True)
+        
+        with torch.no_grad():
+            for index, (images, labels) in enumerate(self.val_loader):
+                images = images.cuda()
+                labels = labels.cuda()
+                
+                # Use autocast for evaluation
+                with autocast(device_type='cuda'):
+                    masks_pred, iou_pred = self.model(images)
+                predictions = torch.argmax(masks_pred, dim=1)
+                
+                for batch_index in range(images.size()[0]):
+                    # Get predictions and ground truth
+                    pred_mask = get_numpy_from_tensor(predictions[batch_index])
+                    gt_mask = get_numpy_from_tensor(labels[batch_index])
+                    image = get_numpy_from_tensor(images[batch_index])
+                    
+                    # Convert image from tensor format (C,H,W) to numpy format (H,W,C)
+                    image = image.transpose(1, 2, 0)
+                    # Denormalize image if needed (assuming normalization was applied during training)
+                    image = (image * 255).astype(np.uint8)
+                    
+                    # Resize all images and masks to the same size (using original image size)
+                    h, w = image.shape[:2]
+                    pred_mask = cv2.resize(pred_mask, (w, h), interpolation=cv2.INTER_NEAREST)
+                    gt_mask = cv2.resize(gt_mask, (w, h), interpolation=cv2.INTER_NEAREST)
+                    
+                    # Create colored masks
+                    pred_colored = np.zeros((h, w, 3), dtype=np.uint8)
+                    gt_colored = np.zeros((h, w, 3), dtype=np.uint8)
+                    
+                    # Assign colors to each class (you can customize these colors)
+                    colors = {
+                        0: [0, 0, 0],        # Background - Black
+                        1: [0, 255, 0],      # Room -> Green
+                        2: [255, 0, 0],      # Wall -> Red
+                        3: [0, 0, 255],      # Door -> Blue
+                        4: [255, 255, 0],    # Window -> Yellow
+                    }
+                    
+                    # Color the masks
+                    for class_idx, color in colors.items():
+                        pred_colored[pred_mask == class_idx] = color
+                        gt_colored[gt_mask == class_idx] = color
+                    
+                    # Create visualization
+                    vis_image = np.concatenate([image, pred_colored, gt_colored], axis=1)
+                    
+                    # Add to evaluation metric
+                    eval_metric.add(pred_mask, gt_mask)
+                    
+                    # Save visualization
+                    vis_path = os.path.join(vis_dir, f'sample_{index}_{batch_index}.png')
+                    cv2.imwrite(vis_path, cv2.cvtColor(vis_image, cv2.COLOR_RGB2BGR))
+        
+        # Get evaluation metrics
+        mean_iou, mean_iou_foreground = eval_metric.get(clear=True)
+        
+        # Print results
+        print(f"\nTest Results:")
+        print(f"mIoU: {mean_iou:.4f}")
+        print(f"mIoU (foreground): {mean_iou_foreground:.4f}")
+        print(f"Visualizations saved to: {vis_dir}")
+        
+        return mean_iou, mean_iou_foreground
 
     def _eval(self):
         self.model.eval()
@@ -206,6 +301,7 @@ class SemRunner(BaseRunner):
                     gt_mask = get_numpy_from_tensor(labels[batch_index])
                     h, w = pred_mask.shape
                     gt_mask = cv2.resize(gt_mask, (w, h), interpolation=cv2.INTER_NEAREST)
+                    # print(f"pred_mask.shape: {pred_mask.shape}  and  gt_mask.shape: {gt_mask.shape}")
                     eval_metric.add(pred_mask, gt_mask)
         
         self.model.train()
@@ -238,3 +334,68 @@ class SemRunner(BaseRunner):
                 
             loss_dict[item[0]] = loss_val
             total_loss += loss_cfg[item[0]].weight * tmp_loss
+
+    
+
+    def infer(self, image_dir, output_dir, image_size=(1024, 1024)):
+        """Run inference on a directory of images without ground truth masks.
+        
+        Args:
+            image_dir (str): Directory containing input images
+            output_dir (str): Directory to save visualization results
+            image_size (tuple): Size to resize input images to (height, width)
+        """
+        self.model.eval()
+        os.makedirs(output_dir, exist_ok=True)
+        os.makedirs(os.path.join(output_dir, 'visualization'), exist_ok=True)
+        
+        # Get list of image files
+        image_files = [f for f in os.listdir(image_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+        
+        with torch.no_grad():
+            for img_file in tqdm(image_files, desc="Processing images"):
+                # Load and preprocess image
+                img_path = os.path.join(image_dir, img_file)
+                orig_image = cv2.imread(img_path)
+                orig_image = cv2.cvtColor(orig_image, cv2.COLOR_BGR2RGB)
+                
+                # Store original size for later
+                orig_h, orig_w = orig_image.shape[:2]
+                
+                # Resize and normalize image for model input
+                image = cv2.resize(orig_image, (image_size[1], image_size[0]))
+                image = image.astype(np.float32) / 255.0
+                image = torch.from_numpy(image).permute(2, 0, 1).unsqueeze(0)
+                
+                # Move to GPU and normalize
+                image = image.cuda()
+                
+                # Run inference
+                masks_pred, _ = self.model(image)
+                
+                # Get predictions and resize back to original size
+                masks_pred = F.interpolate(masks_pred, (orig_h, orig_w), mode="bilinear", align_corners=False)
+                predictions = torch.argmax(masks_pred, dim=1)[0]
+                pred_mask = get_numpy_from_tensor(predictions)
+                pred_mask[pred_mask == 1] = 0
+                
+                # Create visualization
+                base_name = os.path.splitext(img_file)[0]
+                create_visualization(
+                    orig_image, 
+                    pred_mask,
+                    os.path.join(output_dir, 'visualization', f"{base_name}_comparison.png")
+                )
+                
+                # Save individual mask and overlay images
+                # colored_mask = apply_label_colors(pred_mask)
+                # overlay_pred = overlay_mask_on_image(orig_image, pred_mask)
+                
+                # cv2.imwrite(
+                #     os.path.join(output_dir, f"{base_name}_mask.png"), 
+                #     cv2.cvtColor(colored_mask, cv2.COLOR_RGB2BGR)
+                # )
+                # cv2.imwrite(
+                #     os.path.join(output_dir, f"{base_name}_overlay.png"),
+                #     cv2.cvtColor(overlay_pred, cv2.COLOR_RGB2BGR)
+                # )

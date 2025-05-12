@@ -3,3 +3,4 @@ sam_ckpt/*
 experiment/*
 visualization/*
 wandb/*
+*.pth

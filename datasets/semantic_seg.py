@@ -196,7 +196,7 @@ class CubiCasaSegmentation(VOCSemanticDataset):
             mask = resize(mask)
             mask_np = np.array(mask)
             # Shift labels greater than 1 down by 1 to ignore label 1
-            mask_np[mask_np == 1] = 0
+            mask_np[mask_np >= 1] = mask_np[mask_np >= 1] - 1
             mask_np = mask_np.astype(np.float32)
             mask = torch.from_numpy(mask_np).float()
 
@@ -218,6 +218,69 @@ class CubiCasaSegmentation(VOCSemanticDataset):
 
         # if self.with_mask:
         #     data_list.append(self.get_mask(image_id))
+
+        return image, mask
+        
+class HILTISegmentation(VOCSemanticDataset):
+    def __init__(self, root_dir, domain, transform, with_id=False, with_mask=False, target_transform=None):
+        super(CubiCasaSegmentation, self).__init__(
+            root_dir=root_dir,
+            domain=domain,
+            transform=transform,
+            with_id=with_id,
+            with_mask=with_mask
+        )
+
+        self.root_dir = root_dir
+        self.transform = transform
+
+        self.image_dir = os.path.join(self.root_dir, 'JPEGImages/') 
+        self.mask_dir = os.path.join(self.root_dir, 'SegmentationClass/')
+
+        self.class_names =  ["background", "rooms", "walls", "doors", "windows"]
+        # self.class_names =  ["background", "walls", "doors", "windows"]
+        
+        splits_dir = os.path.join(self.root_dir, 'ImageSets/Segmentation')
+        split_f = os.path.join(splits_dir, domain.rstrip('\n') + '.txt')
+
+        if not os.path.exists(split_f):
+            raise ValueError(
+                'Wrong domain entered! Please use domain="train" '
+                'or domain="trainval" or domain="val"')
+        
+        self.image_id_list = [image_id.strip() for image_id in open(split_f).readlines()]
+    
+
+    def get_image(self, image_id):
+        image = Image.open(os.path.join(self.image_dir, image_id + '.jpg')).convert('RGB')
+        if self.transform is not None:
+            image = self.transform(image)
+        return image
+
+    def get_mask(self, image_id):
+        mask_path = self.mask_dir + image_id + '.png'
+        if os.path.isfile(mask_path):
+            mask = Image.open(mask_path)
+            
+            resize = self.transform.transforms[0]  # Get the resize transform
+            mask = resize(mask)
+            mask_np = np.array(mask)
+            # Shift labels greater than 1 down by 1 to ignore label 1
+            mask_np[mask_np >= 1] = mask_np[mask_np >= 1] - 1
+            mask_np = mask_np.astype(np.float32)
+            mask = torch.from_numpy(mask_np).float()
+
+        else:
+            mask = None
+        return mask
+
+    def __getitem__(self, index):
+        image_id = self.image_id_list[index]
+
+        image = self.get_image(image_id)
+        mask  = self.get_mask(image_id)
+        mask = np.array(mask)
+
 
         return image, mask
         

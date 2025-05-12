@@ -1,12 +1,12 @@
 from .detection import BaseDetectionDataset
 from .instance_seg import BaseInstanceDataset
-from .semantic_seg import BaseSemanticDataset, VOCSemanticDataset, TorchVOCSegmentation, CubiCasaSegmentation
+from .semantic_seg import BaseSemanticDataset, VOCSemanticDataset, TorchVOCSegmentation, CubiCasaSegmentation, HILTISegmentation
 from .transforms import get_transforms
 from torchvision.datasets import VOCSegmentation
 
 segment_datasets = {'base_ins': BaseInstanceDataset, 'base_sem': BaseSemanticDataset,
                     'voc_sem': VOCSemanticDataset, 'torch_voc_sem': TorchVOCSegmentation,
-                    'cubicasa_sem_seg': CubiCasaSegmentation}
+                    'cubicasa_sem_seg': CubiCasaSegmentation, 'hilti_sem_seg': HILTISegmentation}
 det_dataset = {'base_det': BaseDetectionDataset, }
 
 

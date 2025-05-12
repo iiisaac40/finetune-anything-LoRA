@@ -41,10 +41,10 @@ train:
       weight: 1.0
       label_one_hot: False
       params:
-        ignore_index: 0
-        alpha: 1.0  # weight for CE loss
-        beta: 0.5   # weight for Dice loss
-        gamma_focal: 0.25  # weight for Focal loss
+        ignore_index: 255
+        alpha: 0.3 # weight for CE loss
+        beta: 0.4   # weight for Dice loss
+        gamma_focal: 0.5  # weight for Focal loss
 
   # Optimizer
   opt_params:
@@ -107,5 +107,49 @@ val:
 
 
 test:
-  need_test: False
+  need_test: True
+  experiment_name: 'semantic_sam'
+  runner_name: 'sem_runner'
 
+  dataset:
+    name: 'cubicasa_sem_seg'
+    params:
+      root_dir: '/home/hao-zhu/Project/SemanticSeg/data/voc_format_data'
+      domain: 'val'
+    transforms:
+      resize:
+        params:
+          size: [1024, 1024]
+      to_tensor:
+        params: ~
+    target_transforms:
+      resize:
+        params:
+          size: [1024, 1024]
+
+  bs: 2 # 8
+  num_workers: 1
+  drop_last: True
+  # Logger
+  use_tensorboard: False
+  tensorboard_folder: './experiment/tensorboard'
+  log_folder: './experiment/log'
+  model_folder: './experiment/model'
+
+infer:
+  need_test: True
+  experiment_name: 'semantic_sam'
+  runner_name: 'sem_runner'
+
+  infer:
+    image_dir: '/home/hao-zhu/Downloads/RealisticFloorPlan/DatasetFloorplanJVAnonymisedHalf1_Strict_Filter'
+    output_dir: './experiment/infer_output'
+
+  bs: 1 # 8
+  num_workers: 1
+  drop_last: True
+  # Logger
+  use_tensorboard: False
+  tensorboard_folder: './experiment/tensorboard'
+  log_folder: './experiment/log'
+  model_folder: './experiment/model'
